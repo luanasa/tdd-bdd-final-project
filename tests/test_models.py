@@ -1,140 +1,219 @@
-from service.models import Product, db
-from tests.factories import ProductFactory
+"""
+Test cases for Product Model
+"""
 import logging
+import pytest
+from werkzeug.exceptions import NotFound
+from service.models import Product, db, DataValidationError
+from tests.factories import ProductFactory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+@pytest.fixture(scope="module")
+def app():
+    """Setup the test app"""
+    from service import app
+    app.config['TESTING'] = True
+    with app.app_context():
+        db.create_all()
+        yield app
+        db.session.remove()
+        db.drop_all()
+
+@pytest.fixture(scope="function")
+def database(app):
+    """Clean the database between tests"""
+    db.session.query(Product).delete()
+    db.session.commit()
+
 class TestProductModel:
     """Test suite for the Product model"""
 
-    def test_create_product(self):
+    def test_create_product(self, database):
         """It should create a Product and assert its properties"""
         product = ProductFactory()
         logger.info("Test Product: %s", product)
         assert product is not None
         assert product.id is None
-        assert product.name is not None
-        assert product.description is not None
-        assert product.price is not None
-        assert product.available is not None
-        assert product.category is not None
+        assert isinstance(product.name, str)
+        assert isinstance(product.description, str)
+        assert isinstance(product.price, float)
+        assert isinstance(product.available, bool)
+        assert product.category in [
+            Category.UNKNOWN,
+            Category.CLOTHS,
+            Category.FOOD,
+            Category.HOUSEWARES,
+            Category.AUTOMOTIVE,
+            Category.TOOLS
+        ]
 
-    def test_add_product(self):
+    def test_add_product(self, database):
         """It should add a Product to the database"""
         products = Product.all()
-        product_count = len(products)
-        assert product_count == 0
+        assert len(products) == 0
 
         product = ProductFactory()
         product.create()
         
-        # Assert that it was assigned an id and shows up in the database
         assert product.id is not None
-        products = Product.all()
-        assert len(products) == product_count + 1
+        assert Product.all().count() == 1
 
-    def test_read_product(self):
+    def test_read_product(self, database):
         """It should read a Product from the database"""
-        product = ProductFactory()
-        logger.info("Test Product: %s", product)
-        product.id = None
-        product.create()
-        assert product.id is not None
+        # Create test data
+        original_product = ProductFactory()
+        original_product.create()
         
-        # Fetch it back
-        found_product = Product.find(product.id)
-        assert found_product.id == product.id
-        assert found_product.name == product.name
-        assert found_product.description == product.description
-        assert float(found_product.price) == float(product.price)
-        assert found_product.available == product.available
-        assert found_product.category == product.category
+        # Test retrieval
+        found_product = Product.find(original_product.id)
+        assert found_product is not None
+        assert found_product.id == original_product.id
+        assert found_product.name == original_product.name
+        assert found_product.description == original_product.description
+        assert float(found_product.price) == float(original_product.price)
+        assert found_product.available == original_product.available
+        assert found_product.category == original_product.category
 
-    def test_update_product(self):
+    def test_update_product(self, database):
         """It should update a Product in the database"""
+        # Create test data
         product = ProductFactory()
-        logger.info("Test Product: %s", product)
-        product.id = None
         product.create()
-        logger.info("Product created: %s", product)
-        assert product.id is not None
-        
-        # Update it
         original_id = product.id
-        product.description = "New description"
+        
+        # Update product
+        new_description = "Updated description"
+        product.description = new_description
         product.update()
         
+        # Verify changes
         assert product.id == original_id
-        assert product.description == "New description"
+        assert product.description == new_description
+        assert Product.all().count() == 1
         
-        # Fetch it back and check
-        products = Product.all()
-        assert len(products) == 1
-        assert products[0].id == original_id
-        assert products[0].description == "New description"
+        # Verify in database
+        updated_product = Product.find(original_id)
+        assert updated_product.description == new_description
 
-    def test_delete_product(self):
+    def test_delete_product(self, database):
         """It should delete a Product from the database"""
         product = ProductFactory()
         product.create()
-        products = Product.all()
-        assert len(products) == 1
+        assert Product.all().count() == 1
         
-        # Delete it
         product.delete()
-        products = Product.all()
-        assert len(products) == 0
+        assert Product.all().count() == 0
 
-    def test_list_all_products(self):
+    def test_list_all_products(self, database):
         """It should list all Products in the database"""
-        products = Product.all()
-        assert len(products) == 0
+        assert Product.all().count() == 0
         
-        # Create 5 products
-        for _ in range(5):
-            product = ProductFactory()
-            product.create()
-        
-        products = Product.all()
-        assert len(products) == 5
-
-    def test_find_by_name(self):
-        """It should find Products by name"""
+        # Create test data
         products = ProductFactory.create_batch(5)
         for product in products:
             product.create()
         
-        name = products[0].name
-        count = len([product for product in products if product.name == name])
-        found = Product.find_by_name(name)
-        assert len(found) == count
-        for product in found:
-            assert product.name == name
+        assert Product.all().count() == 5
 
-    def test_find_by_availability(self):
+    def test_find_by_name(self, database):
+        """It should find Products by name"""
+        # Create test data with known names
+        target_name = "Special Product"
+        ProductFactory(name=target_name).create()
+        ProductFactory(name=target_name).create()
+        ProductFactory.create_batch(3)  # Other products
+        
+        # Test find by name
+        found_products = Product.find_by_name(target_name)
+        assert found_products.count() == 2
+        for product in found_products:
+            assert product.name == target_name
+
+    def test_find_by_availability(self, database):
         """It should find Products by availability"""
-        products = ProductFactory.create_batch(10)
-        for product in products:
-            product.create()
+        # Create test data with known availability
+        ProductFactory(available=True).create()
+        ProductFactory(available=True).create()
+        ProductFactory(available=False).create()
         
-        available = products[0].available
-        count = len([product for product in products if product.available == available])
-        found = Product.find_by_availability(available)
-        assert len(found) == count
-        for product in found:
-            assert product.available == available
+        # Test find by availability
+        available_products = Product.find_by_availability(True)
+        assert available_products.count() == 2
+        
+        unavailable_products = Product.find_by_availability(False)
+        assert unavailable_products.count() == 1
 
-    def test_find_by_category(self):
+    def test_find_by_category(self, database):
         """It should find Products by category"""
-        products = ProductFactory.create_batch(10)
-        for product in products:
-            product.create()
+        # Create test data with known categories
+        target_category = Category.CLOTHS
+        ProductFactory(category=target_category).create()
+        ProductFactory(category=target_category).create()
+        ProductFactory.create_batch(3)  # Other categories
         
-        category = products[0].category
-        count = len([product for product in products if product.category == category])
-        found = Product.find_by_category(category)
-        assert len(found) == count
-        for product in found:
-            assert product.category == category
+        # Test find by category
+        found_products = Product.find_by_category(target_category)
+        assert found_products.count() == 2
+        for product in found_products:
+            assert product.category == target_category
+
+    def test_serialize_product(self, database):
+        """It should serialize a Product"""
+        product = ProductFactory()
+        data = product.serialize()
+        
+        assert data["id"] == product.id
+        assert data["name"] == product.name
+        assert data["description"] == product.description
+        assert float(data["price"]) == float(product.price)
+        assert data["available"] == product.available
+        assert data["category"] == product.category.name
+
+    def test_deserialize_product(self, database):
+        """It should deserialize a Product"""
+        original_product = ProductFactory()
+        data = original_product.serialize()
+        
+        new_product = Product()
+        new_product.deserialize(data)
+        
+        assert new_product.name == original_product.name
+        assert new_product.description == original_product.description
+        assert float(new_product.price) == float(original_product.price)
+        assert new_product.available == original_product.available
+        assert new_product.category == original_product.category
+
+    def test_deserialize_invalid_data(self, database):
+        """It should handle deserialization errors"""
+        invalid_data = [
+            {"name": 123},  # Wrong type
+            {"name": "Test", "price": "not-a-number"},  # Invalid price
+            {},  # Missing data
+            {"name": "Test", "category": "INVALID_CATEGORY"}  # Bad category
+        ]
+        
+        product = Product()
+        for data in invalid_data:
+            with pytest.raises(DataValidationError):
+                product.deserialize(data)
+
+    def test_find_missing_product(self, database):
+        """It should handle missing product lookups"""
+        assert Product.find(999999) is None
+
+    def test_update_missing_product(self, database):
+        """It should handle updating non-existent products"""
+        product = ProductFactory()
+        product.id = 999999
+        with pytest.raises(NotFound):
+            product.update()
+
+    def test_delete_missing_product(self, database):
+        """It should handle deleting non-existent products"""
+        product = ProductFactory()
+        product.id = 999999
+        with pytest.raises(NotFound):
+            product.delete()

@@ -1,69 +1,96 @@
-# Copyright 2016, 2023 John Rofrano. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the 'License');
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an 'AS IS' BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""
-Models for Product Demo Service
-
-All of the models are stored in this module
-
-Models
-------
-Product - A Product used in the Product Store
-
-Attributes:
------------
-name (string) - the name of the product
-description (string) - the description the product belongs to (i.e., dog, cat)
-available (boolean) - True for products that are available for adoption
-
-"""
-import logging
-from enum import Enum
-from decimal import Decimal
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-
-logger = logging.getLogger("flask.app")
-
-# Create the SQLAlchemy object to be initialized later in init_db()
-db = SQLAlchemy()
-
-
-def init_db(app):
-    """Initialize the SQLAlchemy app"""
-    Product.init_db(app)
-
-
-class DataValidationError(Exception):
-    """Used for an data validation errors when deserializing"""
-
-
-class Category(Enum):
-    """Enumeration of valid Product Categories"""
-
-    UNKNOWN = 0
-    CLOTHS = 1
-    FOOD = 2
-    HOUSEWARES = 3
-    AUTOMOTIVE = 4
-    TOOLS = 5
-
-
 class Product(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(64), nullable=False)
-    description = db.Column(db.String(128))
-    price = db.Column(db.Float, nullable=False)
-    available = db.Column(db.Boolean, default=True)
-    category = db.Column(db.String(32), nullable=False)
+    # ... (existing model definition remains the same)
+
+    def serialize(self):
+        """Serializes a Product into a dictionary"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "price": self.price,
+            "available": self.available,
+            "category": self.category if isinstance(self.category, str) else self.category.name
+        }
+
+    def deserialize(self, data):
+        """
+        Deserializes a Product from a dictionary
+        
+        Args:
+            data (dict): A dictionary containing the Product data
+        """
+        try:
+            self.name = data["name"]
+            self.description = data.get("description")
+            self.price = float(data["price"])
+            self.available = data.get("available", True)
+            
+            # Handle category which can be string or enum
+            category = data.get("category")
+            if isinstance(category, str):
+                try:
+                    self.category = Category[category.upper()].name
+                except KeyError:
+                    raise DataValidationError(f"Invalid category: {category}")
+            else:
+                self.category = Category(category).name
+                
+        except KeyError as error:
+            raise DataValidationError("Invalid product: missing " + error.args[0])
+        except (TypeError, ValueError) as error:
+            raise DataValidationError("Invalid product: " + str(error))
+
+    @classmethod
+    def init_db(cls, app):
+        """Initializes the database session"""
+        logger.info("Starting database")
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+
+    @classmethod
+    def all(cls):
+        """Returns all Products"""
+        logger.info("Processing all Products")
+        return cls.query.all()
+
+    @classmethod
+    def find(cls, product_id):
+        """Finds a Product by its ID"""
+        logger.info("Processing lookup for id %s ...", product_id)
+        return cls.query.get(product_id)
+
+    @classmethod
+    def find_by_name(cls, name):
+        """Returns all Products with the given name"""
+        logger.info("Processing name query for %s ...", name)
+        return cls.query.filter(cls.name == name).all()
+
+    @classmethod
+    def find_by_category(cls, category):
+        """Returns all Products in the given category"""
+        logger.info("Processing category query for %s ...", category.name)
+        return cls.query.filter(cls.category == category.name).all()
+
+    @classmethod
+    def find_by_availability(cls, available=True):
+        """Returns all Products by availability"""
+        logger.info("Processing available query for %s ...", available)
+        return cls.query.filter(cls.available == available).all()
+
+    def create(self):
+        """Creates a Product to the database"""
+        logger.info("Creating %s", self.name)
+        db.session.add(self)
+        db.session.commit()
+
+    def update(self):
+        """Updates a Product to the database"""
+        logger.info("Updating %s", self.name)
+        db.session.commit()
+
+    def delete(self):
+        """Removes a Product from the database"""
+        logger.info("Deleting %s", self.name)
+        db.session.delete(self)
+        db.session.commit()

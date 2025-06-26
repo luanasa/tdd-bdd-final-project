@@ -97,22 +97,47 @@ def step_impl(context, element_name):
     element.send_keys(context.clipboard)
 
 ##################################################################
-# This code works because of the following naming convention:
-# The buttons have an id in the html hat is the button text
-# in lowercase followed by '-btn' so the Clean button has an id of
-# id='clear-btn'. That allows us to lowercase the name and add '-btn'
-# to get the element id of any button
+# Button pressing
 ##################################################################
-
-## UPDATE CODE HERE ##
+@when('I press the "{button}" button')
+def step_impl(context, button):
+    button_id = button.lower().replace(' ', '_') + '_btn'
+    context.driver.find_element(By.ID, button_id).click()
 
 ##################################################################
-# This code works because of the following naming convention:
-# The id field for text input in the html is the element name
-# prefixed by ID_PREFIX so the Name field has an id='pet_name'
-# We can then lowercase the name and prefix with pet_ to get the id
+# Message checks
 ##################################################################
+@then('I should see the message "{message}"')
+def step_impl(context, message):
+    found = WebDriverWait(context.driver, context.wait_seconds).until(
+        expected_conditions.text_to_be_present_in_element(
+            (By.ID, 'flash_message'),
+            message
+        )
+    )
+    assert(found)
 
+##################################################################
+# Search results checks
+##################################################################
+@then('I should see "{text_string}" in the search results')
+def step_impl(context, text_string):
+    found = WebDriverWait(context.driver, context.wait_seconds).until(
+        expected_conditions.text_to_be_present_in_element(
+            (By.ID, 'search_results'),
+            text_string
+        )
+    )
+    assert(found)
+
+@then('I should not see "{text_string}" in the search results')
+def step_impl(context, text_string):
+    element = context.driver.find_element(By.ID, 'search_results')
+    assert(text_string not in element.text)
+
+##################################################################
+# Field value checks
+##################################################################
 @then('I should see "{text_string}" in the "{element_name}" field')
 def step_impl(context, text_string, element_name):
     element_id = ID_PREFIX + element_name.lower().replace(' ', '_')
